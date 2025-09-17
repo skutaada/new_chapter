@@ -99,9 +99,9 @@ def main(args):
     ppd.init(conf["nodes"], conf["devices"])
     full_stats = []
     for model_name, configs, inputs, cls in [
-        ("MLP", mlp_configs, mlp_inputs, MLP),
+        ("CNN", cnn_configs, cnn_inputs, CNN),
         ("LSTM", lstm_configs, lstm_inputs, LSTM),
-        ("CNN", cnn_configs, cnn_inputs, CNN)
+        ("MLP", mlp_configs, mlp_inputs, MLP),
     ]:
         print(f"\n===== {model_name} (Small size) =====")
         for ratio_name, config in configs.items():

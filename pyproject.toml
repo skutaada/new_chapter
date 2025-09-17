@@ -5,8 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "flax>=0.10.4",
+    "flax==0.8.4",
     "jupyter>=1.1.1",
-    "spu==0.9.3b0",
+    "spu>=0.9.3.dev20241009",
     "tqdm>=4.67.1",
 ]

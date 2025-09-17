@@ -21,7 +21,6 @@ class LSTM(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        carry = None
         for hs in self.hidden_sizes:
             cell = nn.LSTMCell(hs)
             rnn = nn.RNN(cell)
