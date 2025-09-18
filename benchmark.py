@@ -9,6 +9,7 @@ from jax import numpy as jnp
 from flax import linen as nn
 from tqdm import tqdm
 from spu.utils import distributed as ppd
+from tqdm import tqdm
 
 from models import MLP, LSTM, CNN
 
@@ -41,7 +42,7 @@ def benchmark_model(model_def: nn.Module, input_shape: Tuple[int], runs=1000):
 
     time_s = []
     time_p = []
-    for _ in range(runs):
+    for _ in tqdm(range(runs)):
         x = jax.random.normal(rng, input_shape)
         x_s = ppd.device("P1")(lambda x: x)(x)
         start = time.time()
@@ -65,29 +66,29 @@ def benchmark_model(model_def: nn.Module, input_shape: Tuple[int], runs=1000):
 
 
 mlp_configs = {
-    "Very Wide Shallow": [1000],
-    "Wide": [500, 500],
-    "Balanced": [250]*4,
-    "Deep": [125]*8,
-    "Very Deep Narrow": [62]*16
+    "Very Wide Shallow": [512],
+    "Wide": [256, 256],
+    "Balanced": [128]*4,
+    "Deep": [64]*8,
+    "Very Deep Narrow": [32]*16
 }
 mlp_inputs = [(1, 128), (1, 512), (1, 1024)]
 
 lstm_configs = {
-    "Very Wide Shallow": [128],
-    "Wide": [90, 90],
-    "Balanced": [75, 75, 75],
-    "Deep": [64]*4,
-    "Very Deep Narrow": [50]*6
+    "Very Wide Shallow": [32],
+    "Wide": [16, 16],
+    "Balanced": [8, 8, 8],
+    "Deep": [4]*4,
+    "Very Deep Narrow": [2]*6
 }
 lstm_inputs = [(1, 16, 32), (1, 32, 64), (1, 64, 128)]
 
 cnn_configs = {
-    "Very Wide Shallow": [128, 128, 128],
-    "Wide": [64]*6,
-    "Balanced": [45]*9,
-    "Deep": [32]*12,
-    "Very Deep Narrow": [22]*18
+    "Very Wide Shallow": [64, 64, 64],
+    "Wide": [32]*6,
+    "Balanced": [16]*9,
+    "Deep": [8]*12,
+    "Very Deep Narrow": [4]*18
 }
 cnn_inputs = [(1, 32, 32, 3), (1, 64, 64, 3), (1, 128, 128, 3)]
 
@@ -99,8 +100,8 @@ def main(args):
     ppd.init(conf["nodes"], conf["devices"])
     full_stats = []
     for model_name, configs, inputs, cls in [
-        ("CNN", cnn_configs, cnn_inputs, CNN),
         ("LSTM", lstm_configs, lstm_inputs, LSTM),
+        ("CNN", cnn_configs, cnn_inputs, CNN),
         ("MLP", mlp_configs, mlp_inputs, MLP),
     ]:
         print(f"\n===== {model_name} (Small size) =====")
