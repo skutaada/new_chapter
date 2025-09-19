@@ -1,23 +1,22 @@
-import time
-import json
 import argparse
+import json
 import statistics as stat
+import time
 from typing import Tuple
 
 import jax
-from jax import numpy as jnp
 from flax import linen as nn
-from tqdm import tqdm
+from jax import numpy as jnp
 from spu.utils import distributed as ppd
 from tqdm import tqdm
 
-from models import MLP, LSTM, CNN
+from models import CNN, LSTM, MLP
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--num-epochs", type=int)
 parser.add_argument("--config", type=str)
-#parser.add_argument("--settings", type=str)
-#parser.add_argument("--model", type=str)
+# parser.add_argument("--settings", type=str)
+# parser.add_argument("--model", type=str)
 parser.add_argument("--results", type=str)
 
 
@@ -33,7 +32,7 @@ def benchmark_model(model_def: nn.Module, input_shape: Tuple[int], runs=1000):
 
     num_params = count_parameters(params)
 
-    for _ in range(10):
+    for _ in range(3):
         x = jax.random.normal(rng, input_shape)
         x_s = ppd.device("P1")(lambda x: x)(x)
         model_def.apply(params, x)
@@ -59,18 +58,18 @@ def benchmark_model(model_def: nn.Module, input_shape: Tuple[int], runs=1000):
         "mean_p": stat.mean(time_p),
         "stdev_p": stat.stdev(time_p),
         "mean_s": stat.mean(time_s),
-        "stdev_s": stat.stdev(time_s)
+        "stdev_s": stat.stdev(time_s),
     }
 
     return stats
 
 
 mlp_configs = {
-    "Very Wide Shallow": [512],
-    "Wide": [256, 256],
-    "Balanced": [128]*4,
-    "Deep": [64]*8,
-    "Very Deep Narrow": [32]*16
+    "Very Wide Shallow": [1024],
+    "Wide": [512, 512],
+    "Balanced": [256] * 4,
+    "Deep": [128] * 8,
+    "Very Deep Narrow": [64] * 16,
 }
 mlp_inputs = [(1, 128), (1, 512), (1, 1024)]
 
@@ -78,29 +77,29 @@ lstm_configs = {
     "Very Wide Shallow": [32],
     "Wide": [16, 16],
     "Balanced": [8, 8, 8],
-    "Deep": [4]*4,
-    "Very Deep Narrow": [2]*6
+    "Deep": [4] * 4,
+    "Very Deep Narrow": [2] * 6,
 }
 lstm_inputs = [(1, 16, 32), (1, 32, 64), (1, 64, 128)]
 
 cnn_configs = {
-    "Very Wide Shallow": [64, 64, 64],
-    "Wide": [32]*6,
-    "Balanced": [16]*12,
-    "Deep": [8]*24,
-    "Very Deep Narrow": [4]*48
+    "Very Wide Shallow": [128, 128, 128],
+    "Wide": [64] * 6,
+    "Balanced": [32] * 12,
+    "Deep": [16] * 24,
+    "Very Deep Narrow": [8] * 48,
 }
 cnn_inputs = [(1, 32, 32, 3), (1, 64, 64, 3), (1, 128, 128, 3)]
 
 
 def main(args):
-    with open(args.config, 'r') as f:
+    with open(args.config, "r") as f:
         conf = json.load(f)
 
     ppd.init(conf["nodes"], conf["devices"])
     full_stats = []
     for model_name, configs, inputs, cls in [
-#        ("LSTM", lstm_configs, lstm_inputs, LSTM),
+        #        ("LSTM", lstm_configs, lstm_inputs, LSTM),
         ("CNN", cnn_configs, cnn_inputs, CNN),
         ("MLP", mlp_configs, mlp_inputs, MLP),
     ]:
@@ -113,12 +112,11 @@ def main(args):
                 stats["input_shape"] = in_shape
                 stats["model_config"] = config
                 full_stats.append(stats)
-    
-    with open(args.results, 'w') as f:
+
+    with open(args.results, "w") as f:
         json.dump(full_stats, f)
 
 
 if __name__ == "__main__":
     args = parser.parse_args()
     main(args)
-
