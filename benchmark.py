@@ -47,11 +47,11 @@ def benchmark_model(model_def: nn.Module, input_shape: Tuple[int], runs=1000):
         x_s = ppd.device("P1")(lambda x: x)(x)
         start = time.time()
         _ = model_def.apply(params, x)
-        time_p.append(start - time.time())
+        time_p.append(time.time() - start)
 
         start = time.time()
         y_s = ppd.device("SPU")(model_def.apply)(params_s, x_s)
-        time_s.append(start - time.time())
+        time_s.append(time.time() - start)
         y = ppd.get(y_s)
 
     stats = {
@@ -86,9 +86,9 @@ lstm_inputs = [(1, 16, 32), (1, 32, 64), (1, 64, 128)]
 cnn_configs = {
     "Very Wide Shallow": [64, 64, 64],
     "Wide": [32]*6,
-    "Balanced": [16]*9,
-    "Deep": [8]*12,
-    "Very Deep Narrow": [4]*18
+    "Balanced": [16]*12,
+    "Deep": [8]*24,
+    "Very Deep Narrow": [4]*48
 }
 cnn_inputs = [(1, 32, 32, 3), (1, 64, 64, 3), (1, 128, 128, 3)]
 
@@ -100,7 +100,7 @@ def main(args):
     ppd.init(conf["nodes"], conf["devices"])
     full_stats = []
     for model_name, configs, inputs, cls in [
-        ("LSTM", lstm_configs, lstm_inputs, LSTM),
+#        ("LSTM", lstm_configs, lstm_inputs, LSTM),
         ("CNN", cnn_configs, cnn_inputs, CNN),
         ("MLP", mlp_configs, mlp_inputs, MLP),
     ]:
