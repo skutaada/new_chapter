@@ -1,8 +1,8 @@
 from typing import List
 
 import jax
-from jax import numpy as jnp
 from flax import linen as nn
+from jax import numpy as jnp
 
 
 class MLP(nn.Module):
@@ -14,24 +14,28 @@ class MLP(nn.Module):
             x = nn.Dense(feat, use_bias=False)(x)
             x = nn.relu(x)
         return nn.Dense(10, use_bias=False)(x)
-    
+
 
 class LSTM(nn.Module):
     hidden_sizes: list[int]
 
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, carry=None):
         for hs in self.hidden_sizes:
-            cell = nn.LSTMCell(hs)
-            rnn = nn.RNN(cell)
-            outputs = []
-            for t in range(x.shape[1]):
-                y = rnn(x[:,t,:])
-                outputs.append(y)
-            x = jnp.stack(outputs, axis=1)
-        x = x[:, -1, :]
-        return nn.Dense(10)(x)
-    
+            ScanLSTM = nn.scan(
+                nn.LSTMCell,
+                variable_broadcast="params",
+                split_rngs={"params": False},
+                in_axes=1,
+                out_axes=1,
+            )
+            lstm = ScanLSTM(features=hs)
+            batch_shape = x[:, 0].shape
+            carry = lstm.initialize_carry(jax.random.key(0), batch_shape)
+            carry, x = lstm(carry, x)
+        x = nn.Dense(10, use_bias=False)(x)
+        return x
+
 
 class CNN(nn.Module):
     channels: list[int]
