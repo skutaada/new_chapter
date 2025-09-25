@@ -11,9 +11,9 @@ class MLP(nn.Module):
     @nn.compact
     def __call__(self, x):
         for feat in self.features:
-            x = nn.Dense(feat)(x)
+            x = nn.Dense(feat, use_bias=False)(x)
             x = nn.relu(x)
-        return nn.Dense(10)(x)
+        return nn.Dense(10, use_bias=False)(x)
     
 
 class LSTM(nn.Module):
@@ -39,7 +39,7 @@ class CNN(nn.Module):
     @nn.compact
     def __call__(self, x):
         for ch in self.channels:
-            x = nn.Conv(ch, kernel_size=(3, 3))(x)
+            x = nn.Conv(ch, kernel_size=(3, 3), use_bias=False)(x)
             x = nn.max_pool(x, (3, 3))
             x = nn.relu(x)
-        return nn.Dense(10)(x)
+        return nn.Dense(10, use_bias=False)(x)
