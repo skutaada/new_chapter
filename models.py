@@ -46,4 +46,3 @@ class CNN(nn.Module):
             x = nn.max_pool(x, (3, 3))
             x = nn.relu(x)
         return x
-
