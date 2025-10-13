@@ -9,6 +9,8 @@ from jax import numpy as jnp
 from spu.utils import distributed as ppd
 from tqdm import tqdm
 
+from simple_cnn import TinyCNN
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--config")
 parser.add_argument("--model")
@@ -72,6 +74,9 @@ def main():
         case "alexnet":
             model = alexnet
             ishape = lenet_shape
+        case "tinycnn":
+            model = TinyCNN(10)
+            ishape = (1, 8, 8, 1)
         case _:
             raise NotImplementedError
 
