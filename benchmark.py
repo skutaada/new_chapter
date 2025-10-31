@@ -74,11 +74,11 @@ mlp_configs = {
 mlp_inputs = [(1, 128), (1, 512), (1, 1024)]
 
 lstm_configs = {
-    "Very Wide Shallow": [10],
-    "Wide": [5, 5],
-    "Balanced": [2, 2, 2],
-    "Deep": [1] * 4,
-    "Very Deep Narrow": [1] * 6,
+    "Very Wide Shallow": [20],
+    "Wide": [10, 10],
+    "Balanced": [7, 7, 6],
+    "Deep": [5] * 4,
+    "Very Deep Narrow": [2] * 10,
 }
 lstm_inputs = [(1, 1, 32), (1, 1, 64), (1, 1, 128)]
 
@@ -99,9 +99,9 @@ def main(args):
     ppd.init(conf["nodes"], conf["devices"])
     full_stats = []
     for model_name, configs, inputs, cls in [
-        #        ("LSTM", lstm_configs, lstm_inputs, LSTM),
-        ("CNN", cnn_configs, cnn_inputs, CNN),
-        ("MLP", mlp_configs, mlp_inputs, MLP),
+        ("LSTM", lstm_configs, lstm_inputs, LSTM),
+        #("CNN", cnn_configs, cnn_inputs, CNN),
+        #("MLP", mlp_configs, mlp_inputs, MLP),
     ]:
         print(f"\n===== {model_name} (Small size) =====")
         for ratio_name, config in configs.items():

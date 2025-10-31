@@ -9,7 +9,6 @@ from jax import random as jrng
 from spu.utils import distributed as ppd
 from tqdm import tqdm
 
-from benchmark import benchmark_model
 from models import CNN, LSTM, MLP
 
 parser = argparse.ArgumentParser(description="Benchmark models.")
@@ -17,37 +16,42 @@ parser.add_argument("--config", default="3pc.json")
 parser.add_argument("--model")
 parser.add_argument("--num-epochs", type=int, default=10)
 parser.add_argument("--results")
+parser.add_argument("--use-spu", action="store_true")
 args = parser.parse_args()
 
 
-with open(args.config, "r") as f:
-    config = json.load(f)
-ppd.init(config["nodes"], config["devices"])
+if args.use_spu:
+    with open(args.config, "r") as f:
+        config = json.load(f)
+    ppd.init(config["nodes"], config["devices"])
 
 
-def benchmark(model_def: nn.Module, params, x_shape, runs=100):
-    rng = jrng.PRNGKey(42)
+def benchmark(model_def: nn.Module, x_shape, runs=100):
+    rng = jrng.PRNGKey(1337)
     x = jnp.ones(x_shape)
     params = model_def.init(rng, x)
-    params_s = ppd.device("P2")(lambda x: x)(params)
+    if args.use_spu:
+        params_s = ppd.device("P2")(lambda x: x)(params)
 
-    for _ in range(3):
-        x = jrng.normal(rng, x_shape)
-        x_s = ppd.device("P1")(lambda x: x)(x)
-        y_s = ppd.device("SPU")(model_def.apply)(params_s, x_s)
-        _ = ppd.get(y_s)
+    if args.use_spu:
+        for _ in range(3):
+            x = jrng.normal(rng, x_shape)
+            x_s = ppd.device("P1")(lambda x: x)(x)
+            y_s = ppd.device("SPU")(model_def.apply)(params_s, x_s)
+            _ = ppd.get(y_s)
 
     time_s = []
     time_p = []
     for _ in tqdm(range(runs)):
         x = jrng.normal(rng, x_shape)
-        x_s = ppd.device("P1")(lambda x: x)(x)
+        if args.use_spu:
+            x_s = ppd.device("P1")(lambda x: x)(x)
 
-        start = time.time()
-        y_s = ppd.device("SPU")(model_def.apply)(params_s, x_s)
-        end = time.time()
-        _ = ppd.get(y_s)
-        time_s.append(end - start)
+            start = time.time()
+            y_s = ppd.device("SPU")(model_def.apply)(params_s, x_s)
+            end = time.time()
+            _ = ppd.get(y_s)
+            time_s.append(end - start)
 
         start = time.time()
         _ = model_def.apply(params, x)
@@ -56,9 +60,9 @@ def benchmark(model_def: nn.Module, params, x_shape, runs=100):
 
     res = {
         "mean_p": stats.mean(time_p),
-        "mean_s": stats.mean(time_s),
+        "mean_s": stats.mean(time_s) if args.use_spu else 0.0,
         "stdev_p": stats.stdev(time_p),
-        "stdev_s": stats.stdev(time_s),
+        "stdev_s": stats.stdev(time_s) if args.use_spu else 0.0,
     }
     return res
 
@@ -67,17 +71,24 @@ mlp_config = {
     "input_size": (1, 10),
     "model_config": {
         "1k": ([100], [28] * 2, [20] * 3, [17] * 4),
+        "5k": ([500], [66] * 2, [48] * 3, [39] * 4),
         "10k": ([1000], [95] * 2, [70] * 3, [56] * 4),
-        "1M": ([10000], [995] * 2, [705] * 3, [575] * 4),
+        #        "1M": ([10000], [995] * 2, [705] * 3, [575] * 4),
+        #        "500k": ([50000], [702] * 2, [498] * 3, [407] * 4),
     },
 }
 
 cnn_config = {
     "input_size": (1, 112, 112, 3),
     "model_config": {
-        "60k": ([25] * 12, [17] * 24, [14] * 36, [12] * 50),
-        "1M": ([100] * 12, [70] * 24, [56] * 36, [48] * 50),
-        "25M": ([500] * 12, [350] * 24, [280] * 36, [48] * 50),
+        # "1k": ([7] * 3, [5] * 6, [4] * 9),
+        # "5k": ([16] * 3, [10] * 6, [8] * 9),
+        # "10k": ([23] * 3, [15] * 6, [12] * 9),
+        #        "60k": ([25] * 12, [17] * 24, [14] * 36, [12] * 50),
+        #        "1M": ([100] * 12, [70] * 24, [56] * 36, [48] * 50),
+        # "25M": ([500] * 12, [350] * 24, [280] * 36, [240] * 50),
+        "25M": ([240] * 50,),
+        #        "15M": ([389] * 12, [270] * 24, [218] * 36, [185] * 50),
     },
 }
 
@@ -114,7 +125,7 @@ def main():
     for np, layers in model_config.items():
         for l in layers:
             m_d = model(l)
-            results = benchmark_model(m_d, input_size, args.num_epochs)
+            results = benchmark(m_d, input_size, args.num_epochs)
             results["type"] = args.model
             results["input_shape"] = input_size
             results["model_config"] = l

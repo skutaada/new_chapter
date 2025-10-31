@@ -85,6 +85,7 @@ def main():
     params_s = ppd.device("P2")(lambda x: x)(params)
 
     time_s = []
+    time_p = []
     for _ in tqdm(range(100)):
         x = jax.random.normal(rng, ishape)
         x_s = ppd.device("P1")(lambda x: x)(x)
@@ -95,8 +96,15 @@ def main():
         y = ppd.get(y_s)
         time_s.append(end - start)
 
+        start = time.time()
+        _ = model.apply(params, x)
+        end = time.time()
+        time_p.append(end - start)
+
     print(f"Mean for {args.model}: {mean(time_s)}")
     print(f"Stdev for {args.model}: {stdev(time_s)}")
+    print(f"Mean Plain for {args.model}: {mean(time_p)}")
+    print(f"Stdev Plain for {args.model}: {stdev(time_p)}")
 
 
 if __name__ == "__main__":
