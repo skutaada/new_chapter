@@ -1,8 +1,9 @@
 import argparse
 import json
 import statistics as stats
-import time
 import threading
+import time
+
 
 from flax import linen as nn
 from jax import numpy as jnp
@@ -94,42 +95,53 @@ def _process_mem_mb():
     return proc.memory_info().rss / (1024 ** 2)
 
 
-class _PowerSampler(threading.Thread):
-    """Background thread that polls pyRAPL energy between start() and stop()."""
+class _ResourceSampler(threading.Thread):
     def __init__(self, interval=0.05):
         super().__init__(daemon=True)
         self.interval = interval
         self._stop_event = threading.Event()
-        self.samples_uj: list[float] = []   # microjoules per sample window
+        self.power_uj: list[float] = []
+        self.mem_mb: list[float] = []
+        self.bw_sent: list[float] = []
+        self.bw_recv: list[float] = []
+        self.timestamps: list[float] = []
+        self._t0 = None
+        self._prev_sent = 0.0
+        self._prev_recv = 0.0
 
     def run(self):
+        self._t0 = time.monotonic()
         while not self._stop_event.is_set():
+            ts = time.monotonic() - self._t0
+            self.timestamps.append(ts)
+
             if RAPL_AVAILABLE:
                 meter = pyRAPL.Measurement("sample")
                 meter.begin()
                 time.sleep(self.interval)
                 meter.end()
-                # sum pkg + dram across all sockets
                 energy = sum(meter.result.pkg or []) + sum(meter.result.dram or [])
-                self.samples_uj.append(energy)
+                self.power_uj.append(energy)
             else:
+                self.power_uj.append(float("nan"))
                 time.sleep(self.interval)
+
+            self.mem_mb.append(_process_mem_mb())
+
+            sent, recv = _loopback_io()
+            self.bw_sent.append(sent - self._prev_sent)
+            self.bw_recv.append(recv - self._prev_recv)
+            self._prev_sent = sent
+            self._prev_recv = recv
 
     def stop(self):
         self._stop_event.set()
         self.join()
 
-    def mean_power_w(self, elapsed_s: float) -> float:
-        """Average power in Watts derived from accumulated energy samples."""
-        if not self.samples_uj or elapsed_s <= 0:
-            return float("nan")
-        total_j = sum(self.samples_uj) / 1e6          # µJ → J
-        return total_j / elapsed_s
-
 
 # ── main benchmark ────────────────────────────────────────────────────────────
 
-def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100):
+def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100, sample_interval=0.05):
     rng = jrng.PRNGKey(1337)
     x = jnp.ones(x_shape)
     params = model_def.init(rng, x)
@@ -146,95 +158,55 @@ def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100):
             _ = ppd.get(y_s)
 
     time_s, time_p = [], []
-    bw_sent_s, bw_recv_s = [], []   # bytes per SPU run
-    bw_sent_p, bw_recv_p = [], []   # bytes per plain run
-    mem_s, mem_p = [], []            # MB snapshots
-    power_s, power_p = [], []        # Watts
+
+    sampler = _ResourceSampler(interval=sample_interval)
+    sampler.start()
 
     for _ in tqdm(range(runs)):
         x = jrng.normal(rng, x_shape)
 
-        # ── SPU run ──────────────────────────────────────────────────────────
         if args.use_spu:
             x_s = ppd.device("P1")(lambda x: x)(x)
 
-            lo_sent_0, lo_recv_0 = _loopback_io()
-            mem_before = _process_mem_mb()
-            sampler = _PowerSampler()
-            sampler.start()
             start = time.time()
-
             y_s = ppd.device("SPU")(model_def.apply)(params_s, x_s)
-
             end = time.time()
-            elapsed = end - start
-            sampler.stop()
-            lo_sent_1, lo_recv_1 = _loopback_io()
-            mem_after = _process_mem_mb()
-
             _ = ppd.get(y_s)
+            time_s.append(end - start)
 
-            time_s.append(elapsed)
-            bw_sent_s.append(lo_sent_1 - lo_sent_0)
-            bw_recv_s.append(lo_recv_1 - lo_recv_0)
-            mem_s.append(max(mem_before, mem_after))
-            power_s.append(sampler.mean_power_w(elapsed))
-
-        # ── plain run ─────────────────────────────────────────────────────────
-        lo_sent_0, lo_recv_0 = _loopback_io()
-        mem_before = _process_mem_mb()
-        sampler = _PowerSampler()
-        sampler.start()
         start = time.time()
-
         _ = model_def.apply(params, x)
-
         end = time.time()
-        elapsed = end - start
-        sampler.stop()
-        lo_sent_1, lo_recv_1 = _loopback_io()
-        mem_after = _process_mem_mb()
+        time_p.append(end - start)
 
-        time_p.append(elapsed)
-        bw_sent_p.append(lo_sent_1 - lo_sent_0)
-        bw_recv_p.append(lo_recv_1 - lo_recv_0)
-        mem_p.append(max(mem_before, mem_after))
-        power_p.append(sampler.mean_power_w(elapsed))
+    sampler.stop()
 
     def _safe_mean(lst):
-        clean = [v for v in lst if v == v]  # drop NaN
+        clean = [v for v in lst if v == v]
         return stats.mean(clean) if clean else float("nan")
-    
+
     def _safe_stdev(lst):
-        clean = [v for v in lst if v == v]  # drop NaN
+        clean = [v for v in lst if v == v]
         return stats.stdev(clean) if len(clean) >= 2 else float("nan")
 
+    power_w = [e / (sampler.interval * 1e6) for e in sampler.power_uj] if sampler.power_uj else []
+
     res = {
-        # timing
         "mean_p":   stats.mean(time_p),
         "mean_s":   stats.mean(time_s) if args.use_spu else 0.0,
         "stdev_p":  stats.stdev(time_p),
         "stdev_s":  stats.stdev(time_s) if args.use_spu else 0.0,
-        # bandwidth sent (bytes)
-        "mean_bw_sent_p":  _safe_mean(bw_sent_p),
-        "mean_bw_sent_s":  _safe_mean(bw_sent_s) if args.use_spu else 0.0,
-        "stdev_bw_sent_p": _safe_stdev(bw_sent_p),
-        "stdev_bw_sent_s": _safe_stdev(bw_sent_s) if args.use_spu else 0.0,
-        # bandwidth recv (bytes)
-        "mean_bw_recv_p":  _safe_mean(bw_recv_p),
-        "mean_bw_recv_s":  _safe_mean(bw_recv_s) if args.use_spu else 0.0,
-        "stdev_bw_recv_p": _safe_stdev(bw_recv_p),
-        "stdev_bw_recv_s": _safe_stdev(bw_recv_s) if args.use_spu else 0.0,
-        # memory (MB)
-        "mean_mem_p":  _safe_mean(mem_p),
-        "mean_mem_s":  _safe_mean(mem_s) if args.use_spu else 0.0,
-        "stdev_mem_p": _safe_stdev(mem_p),
-        "stdev_mem_s": _safe_stdev(mem_s) if args.use_spu else 0.0,
-        # power (Watts)
-        "mean_power_p":  _safe_mean(power_p),
-        "mean_power_s":  _safe_mean(power_s) if args.use_spu else 0.0,
-        "stdev_power_p": _safe_stdev(power_p),
-        "stdev_power_s": _safe_stdev(power_s) if args.use_spu else 0.0,
+        "mean_power_w": _safe_mean(power_w),
+        "mean_mem_mb":  _safe_mean(sampler.mem_mb),
+        "mean_bw_sent": _safe_mean(sampler.bw_sent),
+        "mean_bw_recv": _safe_mean(sampler.bw_recv),
+        "timeseries": {
+            "timestamps_s": sampler.timestamps,
+            "power_w": power_w,
+            "mem_mb": sampler.mem_mb,
+            "bw_sent": sampler.bw_sent,
+            "bw_recv": sampler.bw_recv,
+        },
     }
     return res
 
