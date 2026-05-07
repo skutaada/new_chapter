@@ -8,6 +8,7 @@ dependencies = [
     "flax==0.8.4",
     "jupyter>=1.1.1",
     "matplotlib>=3.10.6",
+    "memray>=1.19.3",
     "pandas>=2.3.2",
     "spu==0.9.3b0",
     "tqdm>=4.67.1",
