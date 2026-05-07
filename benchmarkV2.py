@@ -264,7 +264,7 @@ lstm_config = {
 }
 
 lin_reg_config = {
-    "input": [(1, 10), (1, 50), (1, 100), (1, 250), (1, 500)]
+    "input_size": [(1, 10), (1, 50), (1, 100), (1, 250), (1, 500)]
 }
 
 
@@ -290,17 +290,16 @@ def main():
         case _:
             raise NotImplementedError
 
-    input_size = m_c["input_size"]
-    model_config = m_c["model_config"]
-
     if lin_reg_flag:
-        for i in m_c['input']:
+        for i in m_c['input_size']:
             m_d = model()
             results = benchmark_with_stats(m_d, i, args.num_epochs)
             results["type"] = args.model
             results["input_shape"] = i
             full_stats.append(results)
     else:
+        input_size = m_c["input_size"]
+        model_config = m_c["model_config"]
         for np, layers in model_config.items():
             for l in layers:
                 m_d = model(l)
