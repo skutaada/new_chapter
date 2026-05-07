@@ -53,6 +53,8 @@ def benchmark(model_def: nn.Module, x_shape, runs=100):
 
     time_s = []
     time_p = []
+    sq_diff_sum = 0.0
+    element_count = 0
     for _ in tqdm(range(runs)):
         x = jrng.normal(rng, x_shape)
         if args.use_spu:
@@ -61,19 +63,26 @@ def benchmark(model_def: nn.Module, x_shape, runs=100):
             start = time.time()
             y_s = ppd.device("SPU")(model_def.apply)(params_s, x_s)
             end = time.time()
-            _ = ppd.get(y_s)
+            y_spu = ppd.get(y_s)
             time_s.append(end - start)
 
         start = time.time()
-        _ = model_def.apply(params, x)
+        y_plain = model_def.apply(params, x)
         end = time.time()
         time_p.append(end - start)
+
+        if args.use_spu:
+            sq_diff_sum += float(jnp.sum((y_plain - y_spu) ** 2))
+            element_count += int(y_plain.size)
+
+    rmse = float(jnp.sqrt(sq_diff_sum / element_count)) if args.use_spu else 0.0
 
     res = {
         "mean_p": stats.mean(time_p),
         "mean_s": stats.mean(time_s) if args.use_spu else 0.0,
         "stdev_p": stats.stdev(time_p),
         "stdev_s": stats.stdev(time_s) if args.use_spu else 0.0,
+        "rmse": rmse,
     }
     return res
 
@@ -158,6 +167,8 @@ def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100, sample_interva
             _ = ppd.get(y_s)
 
     time_s, time_p = [], []
+    sq_diff_sum = 0.0
+    element_count = 0
 
     sampler = _ResourceSampler(interval=sample_interval)
     sampler.start()
@@ -171,13 +182,17 @@ def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100, sample_interva
             start = time.time()
             y_s = ppd.device("SPU")(model_def.apply)(params_s, x_s)
             end = time.time()
-            _ = ppd.get(y_s)
+            y_spu = ppd.get(y_s)
             time_s.append(end - start)
 
         start = time.time()
-        _ = model_def.apply(params, x)
+        y_plain = model_def.apply(params, x)
         end = time.time()
         time_p.append(end - start)
+
+        if args.use_spu:
+            sq_diff_sum += float(jnp.sum((y_plain - y_spu) ** 2))
+            element_count += int(y_plain.size)
 
     sampler.stop()
 
@@ -191,11 +206,14 @@ def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100, sample_interva
 
     power_w = [e / (sampler.interval * 1e6) for e in sampler.power_uj] if sampler.power_uj else []
 
+    rmse = float(jnp.sqrt(sq_diff_sum / element_count)) if args.use_spu else 0.0
+
     res = {
         "mean_p":   stats.mean(time_p),
         "mean_s":   stats.mean(time_s) if args.use_spu else 0.0,
         "stdev_p":  stats.stdev(time_p),
         "stdev_s":  stats.stdev(time_s) if args.use_spu else 0.0,
+        "rmse":     rmse,
         "mean_power_w": _safe_mean(power_w),
         "mean_mem_mb":  _safe_mean(sampler.mem_mb),
         "mean_bw_sent": _safe_mean(sampler.bw_sent),
