@@ -13,7 +13,7 @@ from tqdm import tqdm
 import psutil
 import pyRAPL
 
-from models import CNN, LSTM, MLP
+from models import CNN, LSTM, MLP, LinearRegression
 
 parser = argparse.ArgumentParser(description="Benchmark models.")
 parser.add_argument("--config", default="3pc.json")
@@ -245,11 +245,16 @@ lstm_config = {
     },
 }
 
+lin_reg_config = {
+    "input": [(1, 10), (1, 50), (1, 100), (1, 250), (1, 500)]
+}
+
 
 def main():
     full_stats = []
     m_c = {}
     model = None
+    lin_reg_flag = False
     match args.model:
         case "mlp":
             m_c = mlp_config
@@ -260,21 +265,33 @@ def main():
         case "lstm":
             m_c = lstm_config
             model = LSTM
+        case "lin":
+            lin_reg_flag = True
+            m_c = lin_reg_config
+            model = LinearRegression
         case _:
             raise NotImplementedError
 
     input_size = m_c["input_size"]
     model_config = m_c["model_config"]
 
-    for np, layers in model_config.items():
-        for l in layers:
-            m_d = model(l)
-            results = benchmark_with_stats(m_d, input_size, args.num_epochs)
+    if lin_reg_flag:
+        for i in m_c['input']:
+            m_d = model()
+            results = benchmark_with_stats(m_d, i, args.num_epochs)
             results["type"] = args.model
-            results["input_shape"] = input_size
-            results["model_config"] = l
-            results["num_parameters"] = np
+            results["input_shape"] = i
             full_stats.append(results)
+    else:
+        for np, layers in model_config.items():
+            for l in layers:
+                m_d = model(l)
+                results = benchmark_with_stats(m_d, input_size, args.num_epochs)
+                results["type"] = args.model
+                results["input_shape"] = input_size
+                results["model_config"] = l
+                results["num_parameters"] = np
+                full_stats.append(results)
 
     with open(args.results, "w") as f:
         json.dump(full_stats, f)

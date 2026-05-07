@@ -5,6 +5,13 @@ from flax import linen as nn
 from jax import numpy as jnp
 
 
+class LinearRegression(nn.Module):
+    @nn.compact
+    def __call__(self, x):
+        x = nn.Dense(1)(x)
+        return x
+
+
 class MLP(nn.Module):
     features: list[int]
 
