@@ -184,31 +184,35 @@ def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100, sample_interva
     sq_diff_sum = 0.0
     element_count = 0
 
+    xs = [jrng.normal(jrng.fold_in(rng, i), x_shape) for i in range(runs)]
+    y_spus: list = []
+    y_plains: list = []
+
     sampler = _ResourceSampler(interval=sample_interval)
     sampler.start()
 
-    for _ in tqdm(range(runs)):
-        x = jrng.normal(rng, x_shape)
-
-        if args.use_spu:
+    if args.use_spu:
+        sampler.set_phase("spu")
+        for x in tqdm(xs, desc="spu"):
             x_s = ppd.device("P1")(lambda x: x)(x)
-
-            sampler.set_phase("spu")
             start = time.time()
             y_s = ppd.device("SPU")(model_def.apply)(params_s, x_s)
             end = time.time()
-            y_spu = ppd.get(y_s)
-            sampler.set_phase(None)
+            y_spus.append(ppd.get(y_s))
             time_s.append(end - start)
+        sampler.set_phase(None)
 
-        sampler.set_phase("plain")
+    sampler.set_phase("plain")
+    for x in tqdm(xs, desc="plain"):
         start = time.time()
         y_plain = model_def.apply(params, x)
         end = time.time()
-        sampler.set_phase(None)
+        y_plains.append(y_plain)
         time_p.append(end - start)
+    sampler.set_phase(None)
 
-        if args.use_spu:
+    if args.use_spu:
+        for y_plain, y_spu in zip(y_plains, y_spus):
             sq_diff_sum += float(jnp.sum((y_plain - y_spu) ** 2))
             element_count += int(y_plain.size)
 
