@@ -101,9 +101,20 @@ def _loopback_io():
 
 
 def _process_mem_mb():
-    """RSS memory of the current process in MB."""
+    """RSS memory of the current process + all child processes (recursive) in MB.
+
+    For SPU runs the worker nodes are typically launched as child processes
+    via ppd.init / nodectl, so walking children captures their RSS too.
+    Pre-existing daemon nodes that are not children will not be included.
+    """
     proc = psutil.Process()
-    return proc.memory_info().rss / (1024 ** 2)
+    total = proc.memory_info().rss
+    for child in proc.children(recursive=True):
+        try:
+            total += child.memory_info().rss
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return total / (1024 ** 2)
 
 
 class _ResourceSampler(threading.Thread):
@@ -129,6 +140,7 @@ class _ResourceSampler(threading.Thread):
 
     def run(self):
         self._t0 = time.monotonic()
+        self._prev_sent, self._prev_recv = _loopback_io()
         while not self._stop_event.is_set():
             phase = self._phase
 
@@ -178,10 +190,13 @@ def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100, sample_interva
         params_s = ppd.device("P2")(lambda x: x)(params)
 
     # warm-up
+    for _ in range(3):
+        x_warm = jrng.normal(rng, x_shape)
+        _ = model_def.apply(params, x_warm)
     if args.use_spu:
         for _ in range(3):
-            x = jrng.normal(rng, x_shape)
-            x_s = ppd.device("P1")(lambda x: x)(x)
+            x_warm = jrng.normal(rng, x_shape)
+            x_s = ppd.device("P1")(lambda x: x)(x_warm)
             y_s = ppd.device("SPU")(model_def.apply)(params_s, x_s)
             _ = ppd.get(y_s)
 
@@ -242,17 +257,23 @@ def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100, sample_interva
     rmse = float(jnp.sqrt(sq_diff_sum / element_count)) if args.use_spu else 0.0
 
     res = {
-        "mean_p":              stats.mean(time_p),
-        "mean_s":              stats.mean(time_s) if args.use_spu else 0.0,
-        "stdev_p":             stats.stdev(time_p),
-        "stdev_s":             stats.stdev(time_s) if args.use_spu else 0.0,
-        "rmse":                rmse,
-        "mean_power_w_spu":    _safe_mean(power_w_spu) if args.use_spu else float("nan"),
-        "mean_power_w_plain":  _safe_mean(power_w_plain),
-        "mean_mem_mb_spu":     _safe_mean(sampler.mem_mb_spu) if args.use_spu else float("nan"),
-        "mean_mem_mb_plain":   _safe_mean(sampler.mem_mb_plain),
-        "mean_bw_sent_spu":    _safe_mean(sampler.bw_sent_spu) if args.use_spu else float("nan"),
-        "mean_bw_recv_spu":    _safe_mean(sampler.bw_recv_spu) if args.use_spu else float("nan"),
+        "mean_p":               stats.mean(time_p),
+        "mean_s":               stats.mean(time_s) if args.use_spu else 0.0,
+        "stdev_p":              stats.stdev(time_p),
+        "stdev_s":              stats.stdev(time_s) if args.use_spu else 0.0,
+        "rmse":                 rmse,
+        "mean_power_w_spu":     _safe_mean(power_w_spu) if args.use_spu else float("nan"),
+        "stdev_power_w_spu":    _safe_stdev(power_w_spu) if args.use_spu else float("nan"),
+        "mean_power_w_plain":   _safe_mean(power_w_plain),
+        "stdev_power_w_plain":  _safe_stdev(power_w_plain),
+        "mean_mem_mb_spu":      _safe_mean(sampler.mem_mb_spu) if args.use_spu else float("nan"),
+        "stdev_mem_mb_spu":     _safe_stdev(sampler.mem_mb_spu) if args.use_spu else float("nan"),
+        "mean_mem_mb_plain":    _safe_mean(sampler.mem_mb_plain),
+        "stdev_mem_mb_plain":   _safe_stdev(sampler.mem_mb_plain),
+        "mean_bw_sent_spu":     _safe_mean(sampler.bw_sent_spu) if args.use_spu else float("nan"),
+        "stdev_bw_sent_spu":    _safe_stdev(sampler.bw_sent_spu) if args.use_spu else float("nan"),
+        "mean_bw_recv_spu":     _safe_mean(sampler.bw_recv_spu) if args.use_spu else float("nan"),
+        "stdev_bw_recv_spu":    _safe_stdev(sampler.bw_recv_spu) if args.use_spu else float("nan"),
         "timeseries": {
             "timestamps_spu":   sampler.timestamps_spu,
             "timestamps_plain": sampler.timestamps_plain,
