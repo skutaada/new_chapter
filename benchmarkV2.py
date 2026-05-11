@@ -19,6 +19,8 @@ parser = argparse.ArgumentParser(description="Benchmark models.")
 parser.add_argument("--config", default="3pc.json")
 parser.add_argument("--model")
 parser.add_argument("--num-epochs", type=int, default=10)
+parser.add_argument("--num-epochs-spu", type=int, default=None)
+parser.add_argument("--num-epochs-plain", type=int, default=None)
 parser.add_argument("--results")
 parser.add_argument("--use-spu", action="store_true")
 args = parser.parse_args()
@@ -164,7 +166,10 @@ class _ResourceSampler(threading.Thread):
 
 # ── main benchmark ────────────────────────────────────────────────────────────
 
-def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100, sample_interval=0.05):
+def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100, sample_interval=0.05,
+                         runs_spu=None, runs_plain=None):
+    runs_spu = runs_spu if runs_spu is not None else runs
+    runs_plain = runs_plain if runs_plain is not None else runs
     rng = jrng.PRNGKey(1337)
     x = jnp.ones(x_shape)
     params = model_def.init(rng, x)
@@ -184,7 +189,12 @@ def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100, sample_interva
     sq_diff_sum = 0.0
     element_count = 0
 
-    xs = [jrng.normal(jrng.fold_in(rng, i), x_shape) for i in range(runs)]
+    n_shared = min(runs_spu, runs_plain) if args.use_spu else 0
+    xs_spu = [jrng.normal(jrng.fold_in(rng, i), x_shape) for i in range(runs_spu)]
+    xs_plain = (
+        xs_spu[:n_shared] + [jrng.normal(jrng.fold_in(rng, i), x_shape)
+                             for i in range(n_shared, runs_plain)]
+    )
     y_spus: list = []
     y_plains: list = []
 
@@ -193,7 +203,7 @@ def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100, sample_interva
 
     if args.use_spu:
         sampler.set_phase("spu")
-        for x in tqdm(xs, desc="spu"):
+        for x in tqdm(xs_spu, desc="spu"):
             x_s = ppd.device("P1")(lambda x: x)(x)
             start = time.time()
             y_s = ppd.device("SPU")(model_def.apply)(params_s, x_s)
@@ -203,7 +213,7 @@ def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100, sample_interva
         sampler.set_phase(None)
 
     sampler.set_phase("plain")
-    for x in tqdm(xs, desc="plain"):
+    for x in tqdm(xs_plain, desc="plain"):
         start = time.time()
         y_plain = model_def.apply(params, x)
         end = time.time()
@@ -212,7 +222,7 @@ def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100, sample_interva
     sampler.set_phase(None)
 
     if args.use_spu:
-        for y_plain, y_spu in zip(y_plains, y_spus):
+        for y_plain, y_spu in zip(y_plains[:n_shared], y_spus[:n_shared]):
             sq_diff_sum += float(jnp.sum((y_plain - y_spu) ** 2))
             element_count += int(y_plain.size)
 
@@ -321,7 +331,9 @@ def main():
     if lin_reg_flag:
         for i in m_c['input_size']:
             m_d = model()
-            results = benchmark_with_stats(m_d, i, args.num_epochs)
+            results = benchmark_with_stats(m_d, i, args.num_epochs,
+                                              runs_spu=args.num_epochs_spu,
+                                              runs_plain=args.num_epochs_plain)
             results["type"] = args.model
             results["input_shape"] = i
             full_stats.append(results)
@@ -331,7 +343,9 @@ def main():
         for np, layers in model_config.items():
             for l in layers:
                 m_d = model(l)
-                results = benchmark_with_stats(m_d, input_size, args.num_epochs)
+                results = benchmark_with_stats(m_d, input_size, args.num_epochs,
+                                                  runs_spu=args.num_epochs_spu,
+                                                  runs_plain=args.num_epochs_plain)
                 results["type"] = args.model
                 results["input_shape"] = input_size
                 results["model_config"] = l
