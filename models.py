@@ -20,6 +20,7 @@ class MLP(nn.Module):
         for feat in self.features:
             x = nn.Dense(feat, use_bias=False)(x)
             x = nn.relu(x)
+        x = nn.Dense(1, use_bias=False)(x)
         return x
 
 
