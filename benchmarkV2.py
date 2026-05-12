@@ -291,7 +291,7 @@ def benchmark_with_stats(model_def: nn.Module, x_shape, runs=100, sample_interva
 mlp_config = {
     "input_size": (1, 10),
     "model_config": {
-        "fhe": ([40]*2)
+        "fhe": ([40]*2,)
         # "1k": ([100], [28] * 2, [20] * 3, [17] * 4),
         # "5k": ([500], [66] * 2, [48] * 3, [39] * 4),
         # "10k": ([1000], [95] * 2, [70] * 3, [56] * 4),
